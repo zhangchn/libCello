@@ -10,17 +10,9 @@
 #include <sys/rbtree.h>
 #include <assert.h>
 
-struct MapNode {
-  var leaf_key;
-  var leaf_val;
-  struct MapNode* left;
-  struct MapNode* right;
-};
 
 data {
   var type;
-  var keys;
-  //struct MapNode* root;
   rb_tree_t tree;
   rb_tree_ops_t ops;
 } MapData;
@@ -55,25 +47,14 @@ int compare_nodes(void *context, const void *node1, const void *node2)
 int compare_key(void *context, const void *node, const void *key)
 {
   if_eq( ((tree_node *)node)->key, (var)key )
-    {
-        println("%s = %s", ((tree_node *)node)->key, (var)key);
     return 0;
-    }
   if_lt( ((tree_node *)node)->key, (var)key )
-    {
-        println("%s < %s", ((tree_node *)node)->key, (var)key);
     return -1;
-    }
   else
-  {
-              println("%s > %s", ((tree_node *)node)->key, (var)key);
     return 1;
-  }
-
 }
 var Map_New(var self, var_list vl) {
   MapData* md = cast(self, Map);
-  //md->keys = new(List);
   md->ops.rbto_compare_nodes = compare_nodes;
   md->ops.rbto_compare_key = compare_key;
   md->ops.rbto_node_offset = 0;
@@ -113,16 +94,15 @@ var Map_Eq(var self, var obj) {
   if_neq(type_of(obj), Map) { return False; }
   
   foreach(key in obj) {
-		if (not contains(self, key)) { return False; }
-		if_neq(get(obj, key), get(self, key)) { return False; }
-	}
+    if (not contains(self, key)) { return False; }
+    if_neq(get(obj, key), get(self, key)) { return False; }
+  }
   
   foreach(key in self) {
     if (not contains(obj, key)) { return False; }
-		if_neq(get(self, key), get(obj, key)) { return False; }
-  }
-  
-	return True;
+    if_neq(get(self, key), get(obj, key)) { return False; }
+  }  
+  return True;
 }
 
 int Map_Len(var self) {
@@ -135,7 +115,7 @@ void Map_Clear(var self) {
   MapData* md = cast(self, Map);
   
   while(not is_empty(self)) {
-    discard(self, ((tree_node *)RB_TREE_MIN(&md->tree))->key); // at(md->keys,0));
+    discard(self, ((tree_node *)RB_TREE_MIN(&md->tree))->key); 
   }
 }
 
@@ -160,9 +140,9 @@ var Map_Get(var self, var key) {
   
   tree_node *n = rb_tree_find_node(&md->tree, key);
   
-    if (!n) {
-        return throw(KeyError, "Key '%$' not in Map!", key);
-    }
+  if (!n) {
+    return throw(KeyError, "Key '%$' not in Map!", key);
+  }
   return n->value;
 }
 
@@ -173,8 +153,7 @@ void Map_Put(var self, var key, var val) {
   n->key = key;
   n->value = val;
   tree_node *m = rb_tree_insert_node(&md->tree, n);
-  if (m != n)
-  {
+  if (m != n) {
     free(n);
     m->value = val;
     m->key = key;
@@ -186,46 +165,39 @@ var Map_Iter_Start(var self) {
   MapData* md = cast(self, Map);
 
   tree_node *n = rb_tree_iterate(&md->tree, NULL, RB_DIR_RIGHT);
-  if (!n)
-  {
-      return Iter_End;
+  if (!n) {
+    return Iter_End;
   }
-  else
-  {
-     return n->key;
+  else {
+    return n->key;
   }    
 }
 
 var Map_Iter_End(var self) {
   return Iter_End;
-  //MapData* md = cast(self, Map);
-  //return iter_end(md->keys);
 }
 
 var Map_Iter_Next(var self, var curr) {
   MapData* md = cast(self, Map);
   tree_node *n = rb_tree_find_node(&md->tree, curr);
-  if (!n)
-  {
+  if (!n) {
+    return Iter_End;
+  } else {
+    n = rb_tree_iterate(&md->tree, n, RB_DIR_RIGHT);
+    if (!n)
       return Iter_End;
-  }
-  else
-  {
-      n = rb_tree_iterate(&md->tree, n, RB_DIR_RIGHT);
-      if (!n)
-        return Iter_End;
-      return n->key;
+    return n->key;
   } 
 }
 
 int Map_Show(var self, var output, int pos) {
   pos = print_to(output, pos, "<'Map' At 0x%p {", self);
-    int i = 0;
-    int last_i = len(self)-1;
+  int i = 0;
+  int last_i = len(self)-1;
   foreach(key in self) {
-      pos = print_to(output, pos, "%$:%$", key, get(self, key));
-      if (i < last_i) { pos = print_to(output, pos, ", "); }
-      i++;
+    pos = print_to(output, pos, "%$:%$", key, get(self, key));
+    if (i < last_i) { pos = print_to(output, pos, ", "); }
+    i++;
   }
   
   pos = print_to(output, pos, "}>");
