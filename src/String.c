@@ -89,7 +89,7 @@ var String_Gt(var self, var obj) {
 var String_Lt(var self, var obj) {
   StringData* s = cast(self, String);
 //  if (not type_implements(type_of(obj), AsStr)) return false;
-    if (not type_implements(type_of(obj), AsStr)) return throw(TypeError, "Instance not implementing Lt");
+  if (not type_implements(type_of(obj), AsStr)) return throw(TypeError, "Instance not implementing Lt");
   
   const char* fst = s->value;
   const char* snd = as_str(obj);

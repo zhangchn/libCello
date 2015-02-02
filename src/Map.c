@@ -131,8 +131,10 @@ void Map_Discard(var self, var key) {
 
   tree_node *n = rb_tree_find_node(&md->tree, key);
   if (n != NULL)
+  {
     rb_tree_remove_node(&md->tree, n);
-  
+    free(n);
+  }
 }
 
 var Map_Get(var self, var key) {
