@@ -7,6 +7,9 @@
 
 #include <string.h>
 
+#include <sys/rbtree.h>
+#include <assert.h>
+
 struct MapNode {
   var leaf_key;
   var leaf_val;
@@ -17,7 +20,9 @@ struct MapNode {
 data {
   var type;
   var keys;
-  struct MapNode* root;
+  //struct MapNode* root;
+  rb_tree_t tree;
+  rb_tree_ops_t ops;
 } MapData;
 
 var Map = type_data {
@@ -33,17 +38,51 @@ var Map = type_data {
   type_end(Map),
 };
 
+typedef struct {
+    rb_node_t node;
+    var key;
+    var value;
+} tree_node;
+int compare_nodes(void *context, const void *node1, const void *node2)
+{
+  if_eq( ((tree_node *)node1)->key, ((tree_node *)node2)->key )
+    return 0;
+  if_lt( ((tree_node *)node1)->key, ((tree_node *)node2)->key )
+    return -1;
+  else 
+    return 1;
+}
+int compare_key(void *context, const void *node, const void *key)
+{
+  if_eq( ((tree_node *)node)->key, (var)key )
+    {
+        println("%s = %s", ((tree_node *)node)->key, (var)key);
+    return 0;
+    }
+  if_lt( ((tree_node *)node)->key, (var)key )
+    {
+        println("%s < %s", ((tree_node *)node)->key, (var)key);
+    return -1;
+    }
+  else
+  {
+              println("%s > %s", ((tree_node *)node)->key, (var)key);
+    return 1;
+  }
+
+}
 var Map_New(var self, var_list vl) {
   MapData* md = cast(self, Map);
-  md->keys = new(List);
-  md->root = NULL;
+  //md->keys = new(List);
+  md->ops.rbto_compare_nodes = compare_nodes;
+  md->ops.rbto_compare_key = compare_key;
+  md->ops.rbto_node_offset = 0;
+  rb_tree_init(&md->tree, &md->ops);
   return self;
 }
 
 var Map_Delete(var self) {
-  MapData* md = cast(self, Map);
   clear(self);
-  delete(md->keys);
   return self;
 }
 
@@ -71,7 +110,6 @@ var Map_Copy(var self) {
 }
 
 var Map_Eq(var self, var obj) {
-	MapData* md = cast(self, Map);
   if_neq(type_of(obj), Map) { return False; }
   
   foreach(key in obj) {
@@ -89,193 +127,105 @@ var Map_Eq(var self, var obj) {
 
 int Map_Len(var self) {
   MapData* md = cast(self, Map);
-  return len(md->keys);
+
+  return rb_tree_count(&md->tree);
 }
 
 void Map_Clear(var self) {
   MapData* md = cast(self, Map);
   
   while(not is_empty(self)) {
-    discard(self, at(md->keys,0));
+    discard(self, ((tree_node *)RB_TREE_MIN(&md->tree))->key); // at(md->keys,0));
   }
 }
 
 var Map_Contains(var self, var key) {
   MapData* md = cast(self, Map);
-  return contains(md->keys, key);
+    return rb_tree_find_node(&md->tree, key) != NULL ? True : False;
 }
 
-local bool inorder_opt = true;
 
-local var Map_Next_Inorder(struct MapNode* node) {
-  
-  inorder_opt = not inorder_opt;
-  
-  if (inorder_opt) {
-    
-    struct MapNode* rnode = node->left;
-    
-    while(1) {
-      if (rnode->right is NULL) return rnode->leaf_key;
-      else rnode = rnode->right;
-    }
-  
-  } else {
-
-    struct MapNode* lnode = node->right;
-    
-    while(1) {
-      if (lnode->left is NULL) return lnode->leaf_key;
-      else lnode = lnode->left;
-    }
-  
-  }
-  
-}
 
 void Map_Discard(var self, var key) {
   MapData* md = cast(self, Map);
-  
-  struct MapNode** parent = &md->root;
-  struct MapNode* node = md->root;
-  
-  while(node != NULL) {
-    
-    if_eq(node->leaf_key, key) {
-      
-      if ((node->left is NULL) and 
-          (node->right is NULL)) {
-        *parent = NULL;
-        free(node);
-        discard(md->keys, key);
-        return;
-      }
-      
-      if ((node->left is NULL) and
-          not (node->right is NULL)) {
-        *parent = node->right;
-        free(node);
-        discard(md->keys, key);
-        return;
-      }
-      
-      if ((node->right is NULL) and
-          not (node->left is NULL)) {
-        *parent = node->left;
-        free(node);
-        discard(md->keys, key);
-        return;
-      }
-      
-      if (not (node->right is NULL) and
-          not (node->left is NULL)) {
-        var inorder_key = Map_Next_Inorder(node);  
-        var inorder_val = get(self, inorder_key);
-        
-        discard(self, inorder_key);
-        
-        node->leaf_key = inorder_key;
-        node->leaf_val = inorder_val;
-        
-        discard(md->keys, key);
-        push_back(md->keys, inorder_key);
-        return;
-      }
-          
-    }
-    
-    if_lt(node->leaf_key, key) {
-      parent = &node->left;
-      node = node->left;
-    } else {
-      parent = &node->right;
-      node = node->right;
-    }
-    
-  }
+
+  tree_node *n = rb_tree_find_node(&md->tree, key);
+  if (n != NULL)
+    rb_tree_remove_node(&md->tree, n);
   
 }
 
 var Map_Get(var self, var key) {
   MapData* md = cast(self, Map);
   
-  struct MapNode* node = md->root;
+  tree_node *n = rb_tree_find_node(&md->tree, key);
   
-  while(node != NULL) {
-    if_eq(node->leaf_key, key) return node->leaf_val;
-    if_lt(node->leaf_key, key) node = node->left;
-    else node = node->right;
-  }
-  
-  return throw(KeyError, "Key '%$' not in Map!", key);
-}
-
-local struct MapNode* Map_Node_New(var key, var val) {
-  struct MapNode* node = malloc(sizeof(struct MapNode));
-  
-  if (node == NULL) { throw(OutOfMemoryError, "Cannot create new Map Node. Out of memory!"); }
-  
-  node->leaf_key = key;
-  node->leaf_val = val;
-  node->left = NULL;
-  node->right = NULL;
-  return node;    
+    if (!n) {
+        return throw(KeyError, "Key '%$' not in Map!", key);
+    }
+  return n->value;
 }
 
 void Map_Put(var self, var key, var val) {
   MapData* md = cast(self, Map);
   
-  struct MapNode** parent = &md->root;
-  struct MapNode* node = md->root;
-  
-  while (node != NULL) {
-    
-    if_eq(node->leaf_key, key) {
-      node->leaf_val = val;
-      return;
-    }
-    
-    if_lt(node->leaf_key, key) {
-      parent = &node->left;
-      node = node->left;
-    } else {
-      parent = &node->right;
-      node = node->right;
-    }
-    
+  tree_node *n = malloc(sizeof(tree_node));
+  n->key = key;
+  n->value = val;
+  tree_node *m = rb_tree_insert_node(&md->tree, n);
+  if (m != n)
+  {
+    free(n);
+    m->value = val;
+    m->key = key;
   }
-  
-  *parent = Map_Node_New(key, val);
-  push(md->keys, key);
-  return;
-  
+  assert(rb_tree_find_node(&md->tree, key));
 }
 
 var Map_Iter_Start(var self) {
   MapData* md = cast(self, Map);
-  return iter_start(md->keys);
+
+  tree_node *n = rb_tree_iterate(&md->tree, NULL, RB_DIR_RIGHT);
+  if (!n)
+  {
+      return Iter_End;
+  }
+  else
+  {
+     return n->key;
+  }    
 }
 
 var Map_Iter_End(var self) {
-  MapData* md = cast(self, Map);
-  return iter_end(md->keys);
+  return Iter_End;
+  //MapData* md = cast(self, Map);
+  //return iter_end(md->keys);
 }
 
 var Map_Iter_Next(var self, var curr) {
   MapData* md = cast(self, Map);
-  return iter_next(md->keys, curr);
+  tree_node *n = rb_tree_find_node(&md->tree, curr);
+  if (!n)
+  {
+      return Iter_End;
+  }
+  else
+  {
+      n = rb_tree_iterate(&md->tree, n, RB_DIR_RIGHT);
+      if (!n)
+        return Iter_End;
+      return n->key;
+  } 
 }
 
 int Map_Show(var self, var output, int pos) {
-  MapData* md = cast(self, Map);
-  
   pos = print_to(output, pos, "<'Map' At 0x%p {", self);
-  
-  for(int i = 0; i < len(self); i++) {
-    var key = at(md->keys, i);
-    var val = get(self, key);
-    pos = print_to(output, pos, "%$:%$", key, get(self, key));
-    if (i < len(self)-1) { pos = print_to(output, pos, ", "); }
+    int i = 0;
+    int last_i = len(self)-1;
+  foreach(key in self) {
+      pos = print_to(output, pos, "%$:%$", key, get(self, key));
+      if (i < last_i) { pos = print_to(output, pos, ", "); }
+      i++;
   }
   
   pos = print_to(output, pos, "}>");

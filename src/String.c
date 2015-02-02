@@ -88,7 +88,8 @@ var String_Gt(var self, var obj) {
 
 var String_Lt(var self, var obj) {
   StringData* s = cast(self, String);
-  if (not type_implements(type_of(obj), AsStr)) return false;
+//  if (not type_implements(type_of(obj), AsStr)) return false;
+    if (not type_implements(type_of(obj), AsStr)) return throw(TypeError, "Instance not implementing Lt");
   
   const char* fst = s->value;
   const char* snd = as_str(obj);
@@ -97,13 +98,13 @@ var String_Lt(var self, var obj) {
   int sndlen = strlen(snd);
   int minlen = fstlen > sndlen ? sndlen : fstlen; 
   
-  for(int i = 0; i < minlen; i++) {
-    if (fst[i] < snd[i]) return True;
-  }
-  
-  if (fstlen < sndlen) return True;
-  
-  return False;
+//  for(int i = 0; i < minlen; i++) {
+//    if (fst[i] < snd[i]) return True;
+//  }
+    return strncmp(fst, snd, minlen) < 0 ? True : False;
+//  if (fstlen < sndlen) return True;
+//  
+//  return False;
 }
 
 
