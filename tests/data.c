@@ -1323,15 +1323,15 @@ PT_FUNC(test_map_iter) {
     var val = get(m0, key);
     
     switch(counter) {
-      case 0: PT_ASSERT(key is mk0); break;
-      case 1: PT_ASSERT(key is mk1); break;
-      case 2: PT_ASSERT(key is mk2); break;
+      case 0: PT_ASSERT(key is mk2); break;
+      case 1: PT_ASSERT(key is mk0); break;
+      case 2: PT_ASSERT(key is mk1); break;
     }
     
     switch(counter) {
-      case 0: PT_ASSERT(val is dv0); break;
-      case 1: PT_ASSERT(val is dv5); break;
-      case 2: PT_ASSERT(val is dv9); break;
+      case 0: PT_ASSERT(val is dv9); break;
+      case 1: PT_ASSERT(val is dv0); break;
+      case 2: PT_ASSERT(val is dv5); break;
     }
     
     counter++;
