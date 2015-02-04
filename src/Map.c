@@ -121,7 +121,7 @@ void Map_Clear(var self) {
 
 var Map_Contains(var self, var key) {
   MapData* md = cast(self, Map);
-    return rb_tree_find_node(&md->tree, key) != NULL ? True : False;
+  return rb_tree_find_node(&md->tree, key) != NULL ? True : False;
 }
 
 
