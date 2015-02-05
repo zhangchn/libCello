@@ -7,14 +7,24 @@
 
 #include <string.h>
 
+#if defined(__APPLE__)
 #include <sys/rbtree.h>
+#else
+#define AVL_COUNT 
+#include <avl.h>
+#endif
+
 #include <assert.h>
 
 
 data {
   var type;
+#if defined(__APPLE__)
   rb_tree_t tree;
   rb_tree_ops_t ops;
+#else 
+  avl_tree_t tree;
+#endif
 } MapData;
 
 var Map = type_data {
@@ -30,6 +40,7 @@ var Map = type_data {
   type_end(Map),
 };
 
+#if defined(__APPLE__)
 typedef struct {
     rb_node_t node;
     var key;
@@ -53,12 +64,35 @@ int compare_key(void *context, const void *node, const void *key)
   else
     return 1;
 }
+#else 
+typedef struct {
+    var key;
+    var value;
+} avl_payload;
+int compare_avl_nodes(const void *p1, const void *p2)
+{
+    if_eq(((avl_payload *)p1)->key, ((avl_payload *)p2)->key)
+        return 0;
+    if_lt(((avl_payload *)p1)->key, ((avl_payload *)p2)->key)
+        return -1;
+    else 
+        return 1;
+}
+void free_avl_nodeitem(void *p)
+{
+    free(p);
+}
+#endif
 var Map_New(var self, var_list vl) {
   MapData* md = cast(self, Map);
+#if defined(__APPLE__)
   md->ops.rbto_compare_nodes = compare_nodes;
   md->ops.rbto_compare_key = compare_key;
   md->ops.rbto_node_offset = 0;
   rb_tree_init(&md->tree, &md->ops);
+#else
+  avl_init_tree(&md->tree, compare_avl_nodes, free_avl_nodeitem);
+#endif
   return self;
 }
 
@@ -107,50 +141,77 @@ var Map_Eq(var self, var obj) {
 
 int Map_Len(var self) {
   MapData* md = cast(self, Map);
-
-  return rb_tree_count(&md->tree);
+#if defined(__APPLE__)
+  return (int)rb_tree_count(&md->tree);
+#else
+  return avl_count(&md->tree);
+#endif
 }
 
 void Map_Clear(var self) {
   MapData* md = cast(self, Map);
   
+#if defined(__APPLE__)
   while(not is_empty(self)) {
     discard(self, ((tree_node *)RB_TREE_MIN(&md->tree))->key); 
   }
+#else 
+  avl_clear_tree(&md->tree);
+#endif
 }
 
 var Map_Contains(var self, var key) {
   MapData* md = cast(self, Map);
+#if defined(__APPLE__)
   return rb_tree_find_node(&md->tree, key) != NULL ? True : False;
+#else 
+  avl_payload p = {key, NULL};
+  return avl_search(&md->tree, &p);
+#endif 
 }
 
 
 
 void Map_Discard(var self, var key) {
   MapData* md = cast(self, Map);
-
+#if defined(__APPLE__)
   tree_node *n = rb_tree_find_node(&md->tree, key);
   if (n != NULL)
   {
     rb_tree_remove_node(&md->tree, n);
     free(n);
   }
+#else
+  avl_payload p = {key, NULL};
+  avl_delete(&md->tree, &p);
+#endif
 }
 
 var Map_Get(var self, var key) {
   MapData* md = cast(self, Map);
   
+#if defined(__APPLE__)
   tree_node *n = rb_tree_find_node(&md->tree, key);
   
   if (!n) {
     return throw(KeyError, "Key '%$' not in Map!", key);
   }
   return n->value;
+#else 
+  avl_payload target = {key, NULL};
+  avl_node_t * n = avl_search(&md->tree, &target);
+
+  if (!n) {
+    return throw(KeyError, "Key '%$' not in Map!", key);
+  }
+  return ((avl_payload *)n->item)->value;
+#endif
 }
 
 void Map_Put(var self, var key, var val) {
   MapData* md = cast(self, Map);
   
+#if defined(__APPLE__)
   tree_node *n = malloc(sizeof(tree_node));
   n->key = key;
   n->value = val;
@@ -161,11 +222,25 @@ void Map_Put(var self, var key, var val) {
     m->key = key;
   }
   assert(rb_tree_find_node(&md->tree, key));
+#else
+  avl_payload *p = malloc(sizeof(avl_payload));
+  p->key = key;
+  p->value = val;
+  
+  avl_node_t *e = avl_search(&md->tree, p);
+  if (e) {
+    ((avl_payload *)e->item)->value = val;
+    free(p);
+  } else {
+    avl_insert(&md->tree, p);
+  }
+#endif
 }
 
 var Map_Iter_Start(var self) {
   MapData* md = cast(self, Map);
 
+#if defined(__APPLE__)
   tree_node *n = rb_tree_iterate(&md->tree, NULL, RB_DIR_RIGHT);
   if (!n) {
     return Iter_End;
@@ -173,6 +248,15 @@ var Map_Iter_Start(var self) {
   else {
     return n->key;
   }    
+#else 
+  avl_node_t *n = avl_at(&md->tree, 0);
+  if (!n) {
+    return Iter_End;
+  }
+  else {
+    return ((avl_payload *)n->item)->key;
+  }   
+#endif
 }
 
 var Map_Iter_End(var self) {
@@ -181,6 +265,8 @@ var Map_Iter_End(var self) {
 
 var Map_Iter_Next(var self, var curr) {
   MapData* md = cast(self, Map);
+
+#if defined(__APPLE__)
   tree_node *n = rb_tree_find_node(&md->tree, curr);
   if (!n) {
     return Iter_End;
@@ -190,6 +276,18 @@ var Map_Iter_Next(var self, var curr) {
       return Iter_End;
     return n->key;
   } 
+#else 
+  avl_payload p = {curr, NULL};
+  avl_node_t *n = avl_search(&md->tree, &p);
+  if (!n) {
+    return Iter_End;
+  } else {
+    n = n->next;
+    if (!n)
+      return Iter_End;
+    return ((avl_payload *)n->item)->key;
+  }
+#endif
 }
 
 int Map_Show(var self, var output, int pos) {
