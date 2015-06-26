@@ -1,222 +1,345 @@
-#include "Cello/Thread.h"
-#include "Cello/List.h"
-#include "Cello/String.h"
-#include "Cello/None.h"
-#include "Cello/Exception.h"
-#include "Cello/Bool.h"
+#include "Cello.h"
 
-#include <signal.h>
-#include <string.h>
-#include <errno.h>
+static const char* Current_Name(void) {
+  return "Current";
+}
+
+static const char* Current_Brief(void) {
+  return "Implicit Object";
+}
+
+static const char* Current_Description(void) {
+  return
+    "The `Current` class can be implemented by types which have implicit "
+    "instances associated with them. For example it can be used to retrieve "
+    "the _current_ `Thread`, or it could be used to get the _current_ Garbage "
+    "Collector."
+    "\n\n"
+    "This class may be implemented by types which express the [Singleton "
+    "Design Pattern](http://en.wikipedia.org/wiki/Singleton_pattern)";
+}
+
+static const char* Current_Definition(void) {
+  return
+    "struct Current {\n"
+    "  var (*current)(void);\n"
+    "};\n";
+}
+
+static struct Example* Current_Examples(void) {
+  
+  static struct Example examples[] = {
+    {
+      "Usage",
+      "var gc = current(GC);\n"
+      "show(gc);\n"
+      "var thread = current(Thread);\n"
+      "show(thread);\n"
+    }, {NULL, NULL}
+  };
+
+  return examples;
+  
+}
+
+static struct Method* Current_Methods(void) {
+  
+  static struct Method methods[] = {
+    {
+      "current", 
+      "var current(var type);",
+      "Returns the current active object of the given `type`."
+    }, {NULL, NULL, NULL}
+  };
+  
+  return methods;
+}
+
+var Current = Cello(Current,
+  Instance(Doc,
+    Current_Name,       Current_Brief,    Current_Description,
+    Current_Definition, Current_Examples, Current_Methods));
 
 var current(var type) {
-  return type_class_method(type, Process, current);
+  return type_method(type, Current, current);
 }
 
-void join(var self) {
-  type_class_method(type_of(self), Process, join, self);
-}
-
-void terminate(var self) {
-  type_class_method(type_of(self), Process, terminate, self);
-}
-
-var Thread = type_data {
-  type_begin(Thread),
-  type_entry(Thread, New),
-  type_entry(Thread, Assign),
-  type_entry(Thread, Copy),
-  type_entry(Thread, Call),
-  type_entry(Thread, Process),
-  type_entry(Thread, AsLong),
-  type_end(Thread),
-};
-
-var Thread_New(var self, var_list vl) {
+struct Thread {
   
-  ThreadData* td = cast(self, Thread);
-  td->func = cast(var_list_get(vl), Function);
-  td->args = new(List);
-  td->is_main = false;
-  td->running = false;
+  var func;
+  var args;
+  var tls;
   
-  td->exc_active = false;
-  td->exc_depth = 0;
-  memset(td->exc_buffers, 0, sizeof(jmp_buf) * EXC_MAX_DEPTH);
+  bool is_main;
+  bool is_running;
   
-  td->exc_obj = Undefined;
-  td->exc_msg = new(String, $(String, ""));
-  td->exc_func = NULL;
-  td->exc_file = NULL;
-  td->exc_lineno = 0;
-  memset(td->exc_backtrace, 0, sizeof(void*) * 25);
-  td->exc_backtrace_count = 0;
-  
-  return td;
-}
-
-var Thread_Delete(var self) {
-  ThreadData* td = cast(self, Thread);
-  
-#ifdef _WIN32
-  CloseHandle(td->thread);
-#endif
-  
-  delete(td->args);
-  delete(td->exc_msg);
-  return td;
-}
-
-size_t Thread_Size(void) {
-  return sizeof(ThreadData);
-}
-
-void Thread_Assign(var self, var obj) {
-  
-  ThreadData* td = cast(self, Thread);
-  ThreadData* to = cast(obj,  Thread);
-  
-  assign(td->func, to->func);
-  assign(td->args, to->args);
-  td->thread = to->thread;
-  td->is_main = to->is_main;
-  td->running = to->running;
-  
-  td->exc_active = to->exc_active;
-  td->exc_depth = to->exc_depth;
-  memmove(td->exc_buffers, to->exc_buffers, sizeof(jmp_buf) * EXC_MAX_DEPTH);
-  
-  assign(td->exc_obj, to->exc_obj);
-  assign(td->exc_msg, to->exc_msg);
-  
-  td->exc_func = to->exc_func;
-  td->exc_file = to->exc_file;
-  td->exc_lineno = to->exc_lineno;
-  memmove(td->exc_backtrace, to->exc_backtrace, sizeof(void*) * 25);
-  td->exc_backtrace_count = to->exc_backtrace_count;
-  
-}
-
-var Thread_Copy(var self) {
-  var obj = new(Thread, None);
-  assign(obj, self);
-  return obj;
-}
-
-long Thread_Hash(var self) {
-  return as_long(self);
-}
-
-long Thread_AsLong(var self) {
-  ThreadData* td = cast(self, Thread);
-  if (not td->running) { throw(ValueError, "Cannot get thread ID, thread not running!"); }
-#if defined(__unix__) || defined(__APPLE__)
-  return (long)td->thread;
-#elif defined(_WIN32)
-  return (long)td->id;
+#if defined(CELLO_UNIX)
+  pthread_t thread;
+#elif defined(CELLO_WINDOWS)
+  DWORD id;
+  HANDLE thread;
 #endif  
   
+};
+
+static const char* Thread_Name(void) {
+  return "Thread";
 }
 
-var Thread_Eq(var self, var obj) {
-  return bool_var(as_long(self) == as_long(obj));
+static const char* Thread_Brief(void) {
+  return "Concurrent Execution";
 }
 
-var Thread_Gt(var self, var obj) {
-  return bool_var(as_long(self) > as_long(obj));
+static const char* Thread_Description(void) {
+  return
+    "The `Thread` type provides a basic primitive for concurrent "
+    "execution. It acts as a basic wrapper around operating system threads, "
+    "using WinThreads on Windows and pthreads otherwise.";
 }
 
-var Thread_Lt(var self, var obj) {
-  return bool_var(as_long(self) < as_long(obj));
-}
-
-local bool tls_key_created = false;
-
-#if defined(__unix__) || defined(__APPLE__)
-
-local pthread_key_t key_thread_wrapper;
-local void tls_key_create(void) {
-  pthread_key_create(&key_thread_wrapper, NULL);
-}
-local void tls_key_delete(void) {
-  pthread_key_delete(key_thread_wrapper);
-}
-
-local var Thread_Init_Run(var args) {
+static struct Example* Thread_Examples(void) {
   
-  var self = pop_front(args);
-  pthread_setspecific(key_thread_wrapper, self);
+  static struct Example examples[] = {
+    {
+      "Usage",
+      "var set_value(var args) {\n"
+      "  assign(get(args, $I(0)), $I(1));\n"
+      "  return NULL;\n"
+      "}\n"
+      "\n"
+      "var i = $I(0);\n"
+      "\n"
+      "var x = new(Thread, $(Function, set_value));\n"
+      "call(x, i);\n"
+      "join(x);\n"
+      "\n"
+      "show(i); /* 1 */\n"
+    }, {
+      "Exclusive Resource",
+      "var increment(var args) {\n"
+      "  var mut = get(args, $I(0));\n"
+      "  var tot = get(args, $I(1));\n"
+      "  lock(mut);\n"
+      "  assign(tot, $I(c_int(tot)+1));\n"
+      "  unlock(mut);\n"
+      "  return NULL;\n"
+      "}\n"
+      "\n"
+      "var mutex = new(Mutex);\n"
+      "var total = $I(0);\n"
+      "\n"
+      "var threads = new(Array, Box,\n"
+      "  new(Thread, $(Function, increment)),\n"
+      "  new(Thread, $(Function, increment)),\n"
+      "  new(Thread, $(Function, increment)));\n"
+      "\n"
+      "show(total); /* 0 */\n"
+      "\n"
+      "foreach (t in threads) {\n"
+      "  call(deref(t), mutex, total);\n"
+      "}\n"
+      "\n"
+      "foreach (t in threads) {\n"
+      "  join(deref(t));\n"
+      "}\n"
+      "\n"
+      "show(total); /* 3 */\n"
+    }, {NULL, NULL}
+  };
   
-  ThreadData* td = cast(self, Thread);
-  td->running = true;
-  return call_with(td->func, td->args);  
+  return examples;
 }
 
-#elif defined(_WIN32)
-
-local DWORD key_thread_wrapper;
-local void tls_key_create(void) {
-  key_thread_wrapper = TlsAlloc();
+static void Thread_New(var self, var args) {
+  struct Thread* t = self;
+  t->func = empty(args) ? NULL : get(args, $I(0));
+  t->args = NULL;
+  t->is_main = false;
+  t->is_running = false;
+  t->tls = new_raw(Table, String, Ref);
 }
-local void tls_key_delete(void) {
-  TlsFree(key_thread_wrapper);
-}
 
-local DWORD Thread_Init_Run(var args) {
-    
-  var self = pop_front(args);
-  TlsSetValue(key_thread_wrapper, self);
+static void Thread_Del(var self) {
+  struct Thread* t = self;
+
+#ifdef CELLO_WINDOWS
+  CloseHandle(t->thread);
+#endif
   
-  ThreadData* td = cast(self, Thread);
-  td->running = true;
-  call_with(td->func, td->args);
+  if (t->args isnt NULL) { del_raw(t->args); }
+  del_raw(t->tls);
+}
+
+static int64_t Thread_C_Int(var self) {
+  struct Thread* t = self;
+  
+  if (not t->is_running) {
+    throw(ValueError, "Cannot get thread ID, thread not running!");
+  }
+  
+#if defined(CELLO_UNIX)
+  return (int64_t)t->thread;
+#elif defined(CELLO_WINDOWS)
+  return (int64_t)t->id;
+#endif
+  
+}
+
+static void Thread_Assign(var self, var obj) {
+  struct Thread* t = self;
+  struct Thread* o = cast(obj, Thread);
+  t->func = o->func;
+  t->tls = t->tls ? t->tls : alloc_raw(Table);
+  assign(t->tls, o->tls);
+}
+
+static int Thread_Cmp(var self, var obj) {
+  return (int)(Thread_C_Int(self) - c_int(obj));
+}
+
+static uint64_t Thread_Hash(var self) {
+  return Thread_C_Int(self);
+}
+
+static bool Thread_TLS_Key_Created = false;
+
+#if defined(CELLO_UNIX)
+
+static pthread_key_t Thread_Key_Wrapper;
+
+static void Thread_TLS_Key_Create(void) {
+  pthread_key_create(&Thread_Key_Wrapper, NULL);
+}
+static void Thread_TLS_Key_Delete(void) {
+  pthread_key_delete(Thread_Key_Wrapper);
+}
+
+static var Thread_Init_Run(var self) {
+
+  struct Thread* t = self;  
+  pthread_setspecific(Thread_Key_Wrapper, t);
+  t->is_running = true;
+  
+#ifndef CELLO_NGC
+  var bottom = NULL;
+  var gc = new_raw(GC, $R(&bottom));
+#endif
+
+  var exc = new_raw(Exception);
+  
+  var x = call_with(t->func, t->args);
+  del_raw(t->args);
+  t->args = NULL;
+  
+  del_raw(exc);
+  
+#ifndef CELLO_NGC
+  del_raw(gc);
+#endif
+  
+  return x;
+}
+
+#elif defined(CELLO_WINDOWS)
+
+static DWORD Thread_Key_Wrapper;
+
+static void Thread_TLS_Key_Create(void) {
+  Thread_Key_Wrapper = TlsAlloc();
+}
+static void Thread_TLS_Key_Delete(void) {
+  TlsFree(Thread_Key_Wrapper);
+}
+
+static DWORD Thread_Init_Run(var self) {
+  
+  struct Thread* t = self;
+  TlsSetValue(Thread_Key_Wrapper, t);
+  t->is_running = true;
+  
+  var ex = new_raw(Exception);
+
+#ifndef CELLO_NGC
+  var bottom = NULL;
+  var gc = new_raw(GC, $R(&bottom));
+#endif
+  
+  call_with(t->func, t->args);
+  del_raw(t->args);
+  t->args = NULL;
+  
+#ifndef CELLO_NGC
+  del_raw(gc);
+#endif
+  
+  del_raw(ex);
+  
   return 0;
 }
 
 #endif
 
-var Thread_Call(var self, var args) {
+static var Thread_Call(var self, var args) {
+  
+  struct Thread* t = self;
   
   /* Setup Thread Local Storage */
   
-  if (not tls_key_created) {
-    tls_key_create();
-    tls_key_created = true;
-    atexit(tls_key_delete);
+  if (not Thread_TLS_Key_Created) {
+    Thread_TLS_Key_Create();
+    Thread_TLS_Key_Created = true;
+    atexit(Thread_TLS_Key_Delete);
   }
   
-  /* Copy Arguments & Push Thread Object */  
-  
-  ThreadData* td = cast(self, Thread);
-  assign(td->args, args);
-  push_front(td->args, self);
+  t->args = assign(alloc_raw(type_of(args)), args);  
   
   /* Call Init Thread & Run */
   
-#if defined(__unix__) || defined(__APPLE__)
-  int err = pthread_create(&td->thread, NULL, Thread_Init_Run, td->args);
-  if (err is EINVAL) { throw(ValueError, "Invalid Argument to Thread Creation"); }
-  if (err is EAGAIN) { throw(OutOfMemoryError, "Not enough resources to create another Thread"); }
-  if (err is EBUSY)  { throw(BusyError, "System is too busy to create thread"); }
-#elif defined(_WIN32)
-  td->thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)Thread_Init_Run, td->args, 0, &td->id);
-  if (td->thread == NULL) {
+#if defined(CELLO_UNIX)
+  
+  int err = pthread_create(&t->thread, NULL, Thread_Init_Run, t);
+  
+  if (err is EINVAL) {
+    throw(ValueError, "Invalid Argument to Thread Creation");
+  }
+  
+  if (err is EAGAIN) {
+    throw(OutOfMemoryError, "Not enough resources to create another Thread");
+  }
+  
+  if (err is EBUSY)  {
+    throw(BusyError, "System is too busy to create thread");
+  }
+  
+#elif defined(CELLO_WINDOWS)
+  
+  t->thread = CreateThread(NULL, 0,
+    (LPTHREAD_START_ROUTINE)Thread_Init_Run, t, 0, &t->id);
+  
+  if (t->thread is NULL) {
     throw(ValueError, "Unable to Create WinThread");
   }
+  
 #endif
   
   return self;
   
 }
 
-local ThreadData main_thread_wrapper;
+static var Thread_Main = NULL;
+static var Exception_Main = NULL;
 
-var Thread_Current(void) {
+static void Thread_Main_Del(void) {
+  del_raw(Exception_Main);
+  del_raw(Thread_Main);
+}
+
+static var Thread_Current(void) {
   
-#if defined(__unix__) || defined(__APPLE__)
-  var wrapper = pthread_getspecific(key_thread_wrapper);
-#elif defined(_WIN32)
-  var wrapper = TlsGetValue(key_thread_wrapper);
+#if defined(CELLO_UNIX)
+  var wrapper = pthread_getspecific(Thread_Key_Wrapper);
+#elif defined(CELLO_WINDOWS)
+  var wrapper = TlsGetValue(Thread_Key_Wrapper);
 #endif
   
   /*
@@ -228,149 +351,306 @@ var Thread_Current(void) {
   ** Luckily we can test directly for the main
   ** thread on OSX using this non-portable method
   */
-#if defined(__APPLE__)
+#ifdef CELLO_MAC
   if (pthread_main_np()) { wrapper = NULL; }
 #endif
   
-  if (wrapper) {
-    return wrapper;
-  } else {
-    main_thread_wrapper.is_main = true;
-#if defined(__unix__) || defined(__APPLE__)
-    main_thread_wrapper.thread = pthread_self();
-#elif defined(_WIN32)
-    main_thread_wrapper.thread = GetCurrentThread();
+  if (wrapper is NULL) {
+  
+    if (Thread_Main is NULL) {
+      Thread_Main = new_raw(Thread);
+      Exception_Main = new_raw(Exception);
+      atexit(Thread_Main_Del);
+    }
+    
+    struct Thread* t = Thread_Main;
+    t->is_main = true;
+    t->is_running = true;
+    
+#if defined(CELLO_UNIX)
+    t->thread = pthread_self();
+#elif defined(CELLO_WINDOWS)
+    t->thread = GetCurrentThread();
 #endif
-    return &main_thread_wrapper;
+
+    return Thread_Main;
   }
   
-}
-
-void Thread_Join(var self) {
-  ThreadData* td = cast(self, Thread);
-  if (not td->thread) { return; }
-  
-#if defined(__unix__) || defined(__APPLE__)
-  int err = pthread_join(td->thread, NULL);
-  if (err is EINVAL) { throw(ValueError, "Invalid Argument to Thread Join"); }
-  if (err is ESRCH)  { throw(ValueError, "Invalid Thread"); }
-#elif defined(_WIN32)
-  WaitForSingleObject(td->thread, INFINITE);
-#endif
+  return wrapper;
   
 }
 
-void Thread_Terminate(var self) {
-  ThreadData* td = cast(self, Thread);
-  if (not td->thread) { return; }
+static void Thread_Start(var self) {
+  call(self);
+}
+
+static void Thread_Stop(var self) {
+  struct Thread* t = self;
+  if (not t->thread) { return; }
   
-#if defined(__unix__) || defined(__APPLE__)
-  int err = pthread_kill(td->thread, SIGINT);
-  if (err is EINVAL) { throw(ValueError, "Invalid Argument to Thread Kill"); }
+#if defined(CELLO_UNIX)
+  int err = pthread_kill(t->thread, SIGINT);
+  if (err is EINVAL) { throw(ValueError, "Invalid Argument to Thread Stop"); }
   if (err is ESRCH)  { throw(ValueError, "Invalid Thread"); }
-#elif defined(_WIN32)
-  TerminateThread(td->thread, FALSE);
+#elif defined(CELLO_WINDOWS)
+  TerminateThread(t->thread, FALSE);
 #endif  
   
 }
 
+static void Thread_Join(var self) {
+  struct Thread* t = self;
+  if (not t->thread) { return; }
+  
+#if defined(CELLO_UNIX)
+  int err = pthread_join(t->thread, NULL);
+  if (err is EINVAL) { throw(ValueError, "Invalid Argument to Thread Join"); }
+  if (err is ESRCH)  { throw(ValueError, "Invalid Thread"); }
+#elif defined(CELLO_WINDOWS)
+  WaitForSingleObject(t->thread, INFINITE);
+#endif
+  
+}
+
+static bool Thread_Running(var self) {
+  struct Thread* t = self;
+  return t->is_running;
+}
+
+static var Thread_Get(var self, var key) {
+  struct Thread* t = self;
+  return deref(get(t->tls, key));
+}
+
+static void Thread_Set(var self, var key, var val) {
+  struct Thread* t = self;
+  set(t->tls, key, $R(val));
+}
+
+static bool Thread_Mem(var self, var key) {
+  struct Thread* t = self;
+  return mem(t->tls, key);
+}
+
+static void Thread_Rem(var self, var key) {
+  struct Thread* t = self;
+  rem(t->tls, key);
+}
+
+static var Thread_Key_Type(var self) {
+  struct Thread* t = self;
+  return key_type(t->tls);
+}
+
+static var Thread_Val_Type(var self) {
+  struct Thread* t = self;
+  return val_type(t->tls);
+}
+
+static void Thread_Mark(var self, var gc, void(*f)(var,void*)) {
+  struct Thread* t = self;
+  mark(t->tls, gc, f);
+}
+
+var Thread = Cello(Thread,
+  Instance(Doc,
+    Thread_Name, Thread_Brief, Thread_Description, 
+    NULL, Thread_Examples, NULL),
+  Instance(New,     Thread_New, Thread_Del),
+  Instance(Assign,  Thread_Assign),
+  Instance(Cmp,     Thread_Cmp),
+  Instance(Hash,    Thread_Hash),
+  Instance(Call,    Thread_Call),
+  Instance(Current, Thread_Current),
+  Instance(Mark,    Thread_Mark),
+  Instance(Start,   Thread_Start, Thread_Stop, Thread_Join, Thread_Running),
+  Instance(C_Int,   Thread_C_Int),
+  Instance(Get,     Thread_Get, Thread_Set, Thread_Mem, Thread_Rem));
+
+static const char* Lock_Name(void) {
+  return "Lock";
+}
+
+static const char* Lock_Brief(void) {
+  return "Exclusive Resource";
+}
+
+static const char* Lock_Description(void) {
+  return
+    "The `Lock` class can be implemented by types to limit the access to them. "
+    "For example this class is implemented by the `Mutex` type to provide "
+    "mutual exclusion across Threads.";
+}
+
+static const char* Lock_Definition(void) {
+  return
+    "struct Lock {\n"
+    "  void (*lock)(var);\n"
+    "  void (*unlock)(var);\n"
+    "  bool (*lock_try)(var);\n"
+    "};\n";
+}
+
+static struct Method* Lock_Methods(void) {
+  
+  static struct Method methods[] = {
+    {
+      "lock", 
+      "void lock(var self);",
+      "Wait until a lock can be aquired on object `self`."
+    }, {
+      "lock_try", 
+      "bool lock_try(var self);",
+      "Try to acquire a lock on object `self`. Returns `true` on success and "
+      "`false` if the resource is busy."
+    }, {
+      "unlock", 
+      "void unlock(var self);",
+      "Release lock on object `self`."
+    }, {NULL, NULL, NULL}
+  };
+  
+  return methods;
+}
+
+static struct Example* Lock_Examples(void) {
+  
+  static struct Example examples[] = {
+    {
+      "Usage",
+      "var x = new(Mutex);\n"
+      "lock(x);   /* Lock Mutex */ \n"
+      "print(\"Inside Mutex!\\n\");\n"
+      "unlock(x); /* Unlock Mutex */"
+    }, {NULL, NULL}
+  };
+
+  return examples;
+  
+}
+
+var Lock = Cello(Lock,
+  Instance(Doc,
+    Lock_Name,       Lock_Brief,    Lock_Description,
+    Lock_Definition, Lock_Examples, Lock_Methods));
+
 void lock(var self) {
-  type_class_method(type_of(self), Lock, lock, self);
+  method(self, Lock, lock);
 }
 
 void unlock(var self) {
-  type_class_method(type_of(self), Lock, unlock, self);
+  method(self, Lock, unlock);
 }
 
-data {
-  var type;
-#if defined(__unix__) || defined(__APPLE__)
+bool lock_try(var self) {
+  return method(self, Lock, lock_try);
+}
+
+struct Mutex {
+#if defined(CELLO_UNIX)
   pthread_mutex_t mutex;
-#elif defined(_WIN32)
+#elif defined(CELLO_WINDOWS)
   HANDLE mutex;
 #endif
-
-} MutexData;
-
-var Mutex = type_data {
-  type_begin(Mutex),
-  type_entry(Mutex, New),
-  type_entry(Mutex, Assign),
-  type_entry(Mutex, Copy),
-  type_entry(Mutex, With),
-  type_entry(Mutex, Lock),
-  type_end(Mutex)
 };
 
-var Mutex_New(var self, var_list vl) {
-  MutexData* md = cast(self, Mutex);
-#if defined(__unix__) || defined(__APPLE__)
-  pthread_mutex_init(&md->mutex, NULL);
-#elif defined(_WIN32)
-  md->mutex = CreateMutex(NULL, false, NULL);
+static const char* Mutex_Name(void) {
+  return "Mutex";
+}
+
+static const char* Mutex_Brief(void) {
+  return "Mutual Exclusion Lock";
+}
+
+static const char* Mutex_Description(void) {
+  return
+    "The `Mutex` type can be used to gain mutual exclusion across Threads for "
+    "access to some resource.";
+}
+
+static struct Example* Mutex_Examples(void) {
+  
+  static struct Example examples[] = {
+    {
+      "Usage",
+      "var x = new(Mutex);\n"
+      "with (mut in x) { /* Lock Mutex */ \n"
+      "  print(\"Inside Mutex!\\n\");\n"
+      "} /* Unlock Mutex */"
+    }, {NULL, NULL}
+  };
+
+  return examples;
+  
+}
+
+static void Mutex_New(var self, var args) {
+  struct Mutex* m = self;
+#if defined(CELLO_UNIX)
+  pthread_mutex_init(&m->mutex, NULL);
+#elif defined(CELLO_WINDOWS)
+  m->mutex = CreateMutex(NULL, false, NULL);
 #endif
-  return md;
 }
 
-var Mutex_Delete(var self) {
-  MutexData* md = cast(self, Mutex);
-#if defined(__unix__) || defined(__APPLE__)
-  pthread_mutex_destroy(&md->mutex);
-#elif defined(_WIN32)
-  CloseHandle(md->mutex);
+static void Mutex_Del(var self) {
+  struct Mutex* m = self;
+#if defined(CELLO_UNIX)
+  pthread_mutex_destroy(&m->mutex);
+#elif defined(CELLO_WINDOWS)
+  CloseHandle(m->mutex);
 #endif
-  return md;
 }
 
-size_t Mutex_Size(void) {
-  return sizeof(MutexData);
-}
-
-void Mutex_Assign(var self, var obj) {
-  MutexData* md = cast(self, Mutex);
-  MutexData* mo = cast(self, Mutex);
-  md->mutex = mo->mutex;
-}
-
-var Mutex_Copy(var self) {
-  var obj = new(Mutex);
-  assign(obj, self);
-  return obj;
-}
-
-void Mutex_Lock(var self) {
-  MutexData* md = cast(self, Mutex);
-#if defined(__unix__) || defined(__APPLE__)
-  int err = pthread_mutex_lock(&md->mutex);
-  if (err is EINVAL)     { throw(ValueError, "Invalid Argument to Mutex Lock"); }
-  if (err is EDEADLK)    { throw(ResourceError, "Attempt to relock already held mutex"); }
-#elif defined(_WIN32)
-  WaitForSingleObject(md->mutex, INFINITE);
+static void Mutex_Lock(var self) {
+  struct Mutex* m = self;
+#if defined(CELLO_UNIX)
+  int err = pthread_mutex_lock(&m->mutex);
+  
+  if (err is EINVAL)  {
+    throw(ValueError, "Invalid Argument to Mutex Lock");
+  }
+  
+  if (err is EDEADLK) {
+    throw(ResourceError, "Attempt to relock already held mutex");
+  }
+#elif defined(CELLO_WINDOWS)
+  WaitForSingleObject(m->mutex, INFINITE);
 #endif
   
 }
 
-var Mutex_Lock_Try(var self) {
-  MutexData* md = cast(self, Mutex);
-#if defined(__unix__) || defined(__APPLE__)
-  int err = pthread_mutex_trylock(&md->mutex);
-  if (err == EBUSY) { return False; }
-  if (err is EINVAL) { throw(ValueError, "Invalid Argument to Mutex Lock Try"); }
-  return True;
-#elif defined(_WIN32)
-  return bool_var(not (WaitForSingleObject(md->mutex, 0) is WAIT_TIMEOUT));
+static bool Mutex_Lock_Try(var self) {
+  struct Mutex* m = self;
+#if defined(CELLO_UNIX)
+  int err = pthread_mutex_trylock(&m->mutex);
+  if (err == EBUSY) { return false; }
+  if (err is EINVAL) {
+    throw(ValueError, "Invalid Argument to Mutex Lock Try");
+  }
+  return true;
+#elif defined(CELLO_WINDOWS)
+  return not (WaitForSingleObject(m->mutex, 0) is WAIT_TIMEOUT);
 #endif
   
 }
 
-void Mutex_Unlock(var self) {
-  MutexData* md = cast(self, Mutex);
-#if defined(__unix__) || defined(__APPLE__)
-  int err = pthread_mutex_unlock(&md->mutex);
+static void Mutex_Unlock(var self) {
+  struct Mutex* m = cast(self, Mutex);
+#if defined(CELLO_UNIX)
+  int err = pthread_mutex_unlock(&m->mutex);
   if (err is EINVAL) { throw(ValueError, "Invalid Argument to Mutex Unlock"); }
   if (err is EPERM)  { throw(ResourceError, "Mutex cannot be held by caller"); }
-#elif defined(_WIN32)
-  ReleaseMutex(md->mutex);
+#elif defined(CELLO_WINDOWS)
+  ReleaseMutex(m->mutex);
 #endif
   
 }
+
+var Mutex = Cello(Mutex,
+  Instance(Doc, 
+    Mutex_Name, Mutex_Brief, Mutex_Description, NULL, Mutex_Examples, NULL),
+  Instance(New,    Mutex_New, Mutex_Del),
+  Instance(Lock,   Mutex_Lock, Mutex_Unlock, Mutex_Lock_Try),
+  Instance(Start,  Mutex_Lock, Mutex_Unlock, NULL));
+

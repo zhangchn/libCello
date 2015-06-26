@@ -1,7 +1,7 @@
 CC ?= gcc
 AR ?= ar
 
-VERSION = 1.1.7
+VERSION = 2.0.3
 PACKAGE = libCello-$(VERSION)
 
 BINDIR = ${PREFIX}/bin
@@ -14,55 +14,88 @@ OBJ := $(addprefix obj/,$(notdir $(SRC:.c=.o)))
 TESTS := $(wildcard tests/*.c)
 TESTS_OBJ := $(addprefix obj/,$(notdir $(TESTS:.c=.o)))
 
-DEMOS := $(wildcard demos/*.c)
-DEMOS_OBJ := $(addprefix obj/,$(notdir $(DEMOS:.c=.o)))
-DEMOS_EXE := $(DEMOS:.c=)
+EXAMPLES := $(wildcard examples/*.c)
+EXAMPLES_OBJ := $(addprefix obj/,$(notdir $(EXAMPLES:.c=.o)))
+EXAMPLES_EXE := $(EXAMPLES:.c=)
 
-CFLAGS = -I ./include -std=gnu99 -Wall -Werror -Wno-unused -O3 -g
-LFLAGS = -shared -g -ggdb
+CFLAGS = -I ./include -std=gnu99 -Wall -Wno-unused -g -ggdb
 
 PLATFORM := $(shell uname)
 COMPILER := $(shell $(CC) -v 2>&1 )
 
-ifeq ($(findstring MINGW,$(PLATFORM)),MINGW)
+ifeq ($(findstring CYGWIN,$(PLATFORM)),CYGWIN)
+	PREFIX ?= /usr/local
+	
+	DYNAMIC = libCello.so
+	STATIC = libCello.a
+	LIBS = -lpthread -lm
+	
+	ifneq (,$(wildcard ${LIBDIR}/libdbghelp.a))
+		LIBS += -lDbgHelp
+	else
+		CFLAGS += -DCELLO_NSTRACE
+	endif
+  
+	INSTALL_LIB = mkdir -p ${LIBDIR} && cp -f ${STATIC} ${LIBDIR}/$(STATIC)
+	INSTALL_INC = mkdir -p ${INCDIR} && cp -r include/Cello.h ${INCDIR}
+	UNINSTALL_LIB = rm -f ${LIBDIR}/$(STATIC)
+	UNINSTALL_INC = rm -f ${INCDIR}/Cello.h
+else ifeq ($(findstring MINGW,$(PLATFORM)),MINGW)
 	PREFIX ?= C:/MinGW64/x86_64-w64-mingw32
 
 	DYNAMIC = libCello.dll
 	STATIC = libCello.a
-	LIBS =
-
+  
+	ifneq (,$(wildcard ${LIBDIR}/libdbghelp.a))
+		LIBS += -lDbgHelp
+	else
+		CFLAGS += -DCELLO_NSTRACE
+	endif
+	
 	INSTALL_LIB = cp $(STATIC) $(LIBDIR)/$(STATIC); cp $(DYNAMIC) $(BINDIR)/$(DYNAMIC)
-	INSTALL_INC = cp -r include/* $(INCDIR)
+	INSTALL_INC = cp -r include/Cello.h $(INCDIR)
+	UNINSTALL_LIB = rm -f ${LIBDIR}/$(STATIC)
+	UNINSTALL_INC = rm -f ${INCDIR}/Cello.h
 else ifeq ($(findstring FreeBSD,$(PLATFORM)),FreeBSD)
 	PREFIX ?= /usr/local
 
 	DYNAMIC = libCello.so
 	STATIC = libCello.a
-	LIBS = -lpthread -lexecinfo -lm
+	LIBS = -lpthread -lm
 
 	CFLAGS += -fPIC
 
+	ifneq (,$(wildcard ${LIBDIR}/libexecinfo.a))
+		LIBS += -lexecinfo
+		LFLAGS += -rdynamic
+	else
+		CFLAGS += -DCELLO_NSTRACE
+	endif
+  
 	INSTALL_LIB = mkdir -p ${LIBDIR} && cp -f ${STATIC} ${LIBDIR}/$(STATIC)
-	INSTALL_INC = mkdir -p ${INCDIR} && cp -r include/* ${INCDIR}
+	INSTALL_INC = mkdir -p ${INCDIR} && cp -r include/Cello.h ${INCDIR}
+	UNINSTALL_LIB = rm -f ${LIBDIR}/$(STATIC)
+	UNINSTALL_INC = rm -f ${INCDIR}/Cello.h
 else
 	PREFIX ?= /usr/local
 
 	DYNAMIC = libCello.so
 	STATIC = libCello.a
-	LIBS = -lpthread -ldl -lm
+	LIBS = -lpthread -lm
 
 	CFLAGS += -fPIC
-
-	INSTALL_LIB = mkdir -p ${LIBDIR} && cp -f ${STATIC} ${LIBDIR}/$(STATIC)
-	INSTALL_INC = mkdir -p ${INCDIR} && cp -r include/* ${INCDIR}
-endif
-
-ifeq ($(findstring clang,$(COMPILER)),clang)
-	CFLAGS += -fblocks -Wno-parentheses-equality
-
-	ifneq ($(findstring Darwin,$(PLATFORM)),Darwin)
-		LIBS += -lBlocksRuntime
+  
+	ifneq (,$(wildcard ${LIBDIR}/libexecinfo.a))
+		LIBS += -lexecinfo
+		LFLAGS += -rdynamic
+	else
+		CFLAGS += -DCELLO_NSTRACE
 	endif
+  
+	INSTALL_LIB = mkdir -p ${LIBDIR} && cp -f ${STATIC} ${LIBDIR}/$(STATIC)
+	INSTALL_INC = mkdir -p ${INCDIR} && cp -r include/Cello.h ${INCDIR}
+	UNINSTALL_LIB = rm -f ${LIBDIR}/$(STATIC)
+	UNINSTALL_INC = rm -f ${INCDIR}/Cello.h
 endif
 
 # Libraries
@@ -70,7 +103,7 @@ endif
 all: $(DYNAMIC) $(STATIC)
 
 $(DYNAMIC): $(OBJ)
-	$(CC) $(OBJ) $(LFLAGS) -o $@
+	$(CC) $(OBJ) -shared $(LFLAGS) $(LIBS) -o $@
 
 $(STATIC): $(OBJ)
 	$(AR) rcs $@ $(OBJ)
@@ -83,25 +116,34 @@ obj:
 
 # Tests
 
+check: CFLAGS += -Werror -g -ggdb
 check: $(TESTS_OBJ) $(STATIC)
-	$(CC) $(TESTS_OBJ) $(STATIC) $(LIBS) -o test
-	./test
+	$(CC) $(TESTS_OBJ) $(STATIC) $(LIBS) $(LFLAGS) -o ./tests/test
+	./tests/test
+	rm -f ./tests/test.bin ./tests/test.txt
 
 obj/%.o: tests/%.c | obj
 	$(CC) $< -c $(CFLAGS) -o $@
 
-# Demos
+# Benchmarks
 
-demos: $(DEMOS_EXE)
+bench: CFLAGS += -DCELLO_NDEBUG -pg
+bench: clean $(STATIC)
+	cd benchmarks; ./benchmark; cd ../
 
-demos/%: demos/%.c $(STATIC) | obj
-	$(CC) $< $(STATIC) $(CFLAGS) $(LIBS) -o $@
+# Examples
+
+examples: $(EXAMPLES_EXE)
+
+examples/%: CFLAGS += -Werror
+examples/%: examples/%.c $(STATIC) | obj
+	$(CC) $< $(STATIC) $(CFLAGS) $(LIBS) $(LFLAGS) -o $@
 
 # Dist
 
 dist: all | $(PACKAGE)
-	cp -R demos include src tests INSTALL.md LICENSE.md Makefile README.md $(PACKAGE)
-	tar -czf $(PACKAGE).tar.gz $(PACKAGE)
+	cp -R examples include src tests LICENSE.md Makefile README.md $(PACKAGE)
+	tar -czf $(PACKAGE).tar.gz $(PACKAGE) --exclude='*.exe' --exclude='*.pdb'
 
 $(PACKAGE):
 	mkdir -p $(PACKAGE)
@@ -109,11 +151,17 @@ $(PACKAGE):
 # Clean
 
 clean:
-	rm -f $(OBJ) $(TESTS_OBJ) $(DEMOS_OBJ) $(STATIC) $(DYNAMIC)
-	rm -f test
+	rm -f $(OBJ) $(TESTS_OBJ) $(EXAMPLES_OBJ) $(STATIC) $(DYNAMIC) tests/test
 
 # Install
 
 install: all
 	$(INSTALL_LIB)
 	$(INSTALL_INC)
+	
+# Uninstall
+
+uninstall:
+	$(UNINSTALL_LIB)
+	$(UNINSTALL_INC)
+
